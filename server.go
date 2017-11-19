@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/net/netutil"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -14,85 +15,21 @@ import (
 	"time"
 )
 
+type Item struct {
+	Key   string      `json:"key"`
+	Value interface{} `json:"value"`
+	TTL   string      `json:"ttl"`
+}
+
 const (
 	DefaultPort            = 8182
 	DefaultCacheSize       = 1000
 	DefaultConnectionLimit = 50
 )
 
-type serverActionType uint8
-
-const (
-	serverActionGet serverActionType = iota
-	serverActionPut
-)
-
-type serverAction interface {
-	Type() serverActionType
-	Act(*Cache)
-}
-
-type actionGet struct {
-	key string
-	w   http.ResponseWriter
-	r   *http.Request
-}
-
-func (g *actionGet) Type() serverActionType {
-	return serverActionGet
-}
-
-func (g *actionGet) Act(cache *Cache) {
-	if value := cache.Get(g.key); value == nil {
-		http.Error(g.w, fmt.Sprintf("Key \"%s\" not found", g.key), http.StatusNotFound)
-	} else if b, err := json.Marshal(value); err != nil {
-		http.Error(g.w, fmt.Sprintf("Unable to marshal value: %s", err), http.StatusUnprocessableEntity)
-	} else {
-		g.w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		g.w.Header().Set("Content-Length", strconv.Itoa(len(b)))
-		g.w.WriteHeader(http.StatusOK)
-		g.w.Write(b)
-	}
-}
-
-type actionPut struct {
-	w http.ResponseWriter
-	r *http.Request
-}
-
-func (p *actionPut) Type() serverActionType {
-	return serverActionPut
-}
-
-func (p *actionPut) Act(cache *Cache) {
-	b, err := ioutil.ReadAll(p.r.Body)
-	if err != nil {
-		http.Error(p.w, fmt.Sprintf("Unable to read body: %s", err), http.StatusUnprocessableEntity)
-		return
-	}
-
-	item := new(Item)
-	err = json.Unmarshal(b, item)
-	if err != nil {
-		http.Error(p.w, fmt.Sprintf("Unable to unmarshal body: %s", err), http.StatusUnprocessableEntity)
-		return
-	}
-
-	duration, err := time.ParseDuration(item.TTL)
-	if err != nil {
-		http.Error(p.w, fmt.Sprintf("Invalid TTL format specified: %s", err), http.StatusNotAcceptable)
-		return
-	}
-
-	cache.Put(item.Key, item.Value, duration)
-	p.w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	p.w.Header().Set("Content-Length", "0")
-	p.w.WriteHeader(http.StatusNoContent)
-}
-
 type ServerConfig struct {
 	Port            int // port to present http api to
-	ConnectionLimit int // maximum number of concurrent connections to handle
+	ConnectionLimit int // maximum number of concurrent connections to perform
 	CacheSize       int // maximum number of records allowable in cache
 	Logger          Logger
 }
@@ -112,10 +49,9 @@ type Server struct {
 	mu       *sync.Mutex
 	ctx      context.Context
 	log      Logger
-	cache    *Cache
-	listener *net.TCPListener
+	cache    Cache
+	listener net.Listener
 	running  bool
-	acts     chan serverAction
 }
 
 func NewDefaultServer() (*Server, error) {
@@ -147,8 +83,7 @@ func newServer(config *ServerConfig) (*Server, error) {
 		mu:    new(sync.Mutex),
 		ctx:   context.Background(),
 		log:   def.Logger,
-		cache: NewCache(def.CacheSize),
-		acts:  make(chan serverAction, def.ConnectionLimit),
+		cache: NewMemoryCache(def.CacheSize),
 	}
 
 	tcp, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", def.Port))
@@ -156,10 +91,12 @@ func newServer(config *ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("unable to resolve tcp addr: %s", err)
 	}
 
-	srv.listener, err = net.ListenTCP("tcp", tcp)
+	listener, err := net.ListenTCP("tcp", tcp)
 	if err != nil {
 		return nil, fmt.Errorf("unable to listen: %s", err)
 	}
+
+	srv.listener = netutil.LimitListener(listener, def.ConnectionLimit)
 
 	return srv, nil
 }
@@ -173,47 +110,76 @@ func (srv *Server) Serve() error {
 	srv.mu.Unlock()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/get", srv.get)
-	mux.HandleFunc("/put", srv.put)
+	mux.HandleFunc("/", srv.handle)
 
 	return http.Serve(srv.listener, mux)
 }
 
+func (srv *Server) handle(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		srv.get(w, r)
+	case "PUT":
+		srv.put(w, r)
+	default:
+		defer r.Body.Close()
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+	}
+}
+
 func (srv *Server) get(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
 	split := strings.Split(r.RequestURI, "/")
-	if len(split) != 2 {
+	if len(split) != 3 {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
 
-	select {
-	case srv.acts <- &actionGet{split[1], w, r}:
-	default:
-		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+	if split[1] != "get" {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
+	}
+
+	if value := srv.cache.Get(split[2]); value == nil {
+		http.Error(w, fmt.Sprintf("Key \"%s\" not found", split[2]), http.StatusNotFound)
+	} else if b, err := json.Marshal(value); err != nil {
+		http.Error(w, fmt.Sprintf("Unable to marshal value: %s", err), http.StatusUnprocessableEntity)
+	} else {
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+		w.Write(b)
 	}
 }
 
 func (srv *Server) put(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
 	if r.RequestURI != "/put" {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
 
-	if r.Method != "PUT" {
-		http.Error(w, http.StatusText(http.StatusNotAcceptable), http.StatusNotAcceptable)
+	b, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Unable to read body: %s", err), http.StatusUnprocessableEntity)
 		return
 	}
 
-	select {
-	case srv.acts <- &actionPut{w, r}:
-	default:
-		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+	item := new(Item)
+	err = json.Unmarshal(b, item)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Unable to unmarshal body: %s", err), http.StatusUnprocessableEntity)
+		return
 	}
-}
 
-func (srv *Server) handle() {
-	for act := range srv.acts {
-		act.Act(srv.cache)
+	duration, err := time.ParseDuration(item.TTL)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid TTL format specified: %s", err), http.StatusNotAcceptable)
+		return
 	}
+
+	srv.cache.Put(item.Key, item.Value, duration)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", "0")
+	w.WriteHeader(http.StatusNoContent)
 }

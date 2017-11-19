@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestContainer(t *testing.T) {
+func TestMemoryCache(t *testing.T) {
 	var v interface{}
 
 	t.Run("InvalidMaxSizePanics", func(t *testing.T) {
@@ -19,11 +19,11 @@ func TestContainer(t *testing.T) {
 				t.FailNow()
 			}
 		}()
-		lruchal.NewCache(-1)
+		lruchal.NewMemoryCache(-1)
 	})
 
 	t.Run("Put", func(t *testing.T) {
-		cache := lruchal.NewCache(100)
+		cache := lruchal.NewMemoryCache(100)
 		cache.Put("key1", "value1", time.Millisecond)
 
 		v = cache.Get("key1")
@@ -46,7 +46,7 @@ func TestContainer(t *testing.T) {
 	})
 
 	t.Run("Has", func(t *testing.T) {
-		container := lruchal.NewCache(100)
+		container := lruchal.NewMemoryCache(100)
 		container.Put("key1", "value1", time.Second)
 		if !container.Has("key1") {
 			t.Logf("Expected container to have key \"%s\"", "key1")
@@ -55,7 +55,7 @@ func TestContainer(t *testing.T) {
 	})
 
 	t.Run("Remove", func(t *testing.T) {
-		container := lruchal.NewCache(100)
+		container := lruchal.NewMemoryCache(100)
 		container.Put("key1", "value1", time.Second)
 		if !container.Has("key1") {
 			t.Logf("Expected container to have key \"%s\"", "key1")
@@ -78,7 +78,7 @@ func TestContainer(t *testing.T) {
 	})
 
 	t.Run("Expunge", func(t *testing.T) {
-		container := lruchal.NewCache(100)
+		container := lruchal.NewMemoryCache(100)
 		container.Put("short1", "short1value", time.Microsecond)
 		container.Put("long1", "long1value", time.Second)
 		container.Put("short2", "short2value", time.Microsecond)
@@ -101,9 +101,9 @@ func TestContainer(t *testing.T) {
 	})
 }
 
-func BenchmarkCache(b *testing.B) {
+func BenchmarkMemoryCache(b *testing.B) {
 	maxSize := 100
-	container := lruchal.NewCache(maxSize)
+	container := lruchal.NewMemoryCache(maxSize)
 	wg := new(sync.WaitGroup)
 	s := maxSize * 2
 	wg.Add(s)
