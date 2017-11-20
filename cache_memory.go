@@ -39,6 +39,12 @@ func (ci *memoryCacheItem) Value() interface{} {
 	return ci.value
 }
 
+func (ci *memoryCacheItem) Expired() bool {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	return ci.expired
+}
+
 func (ci *memoryCacheItem) term() {
 	ci.mu.Lock()
 	defer ci.mu.Unlock()
@@ -100,7 +106,7 @@ func (cc *MemoryCache) Remove(key interface{}) interface{} {
 	defer cc.mu.Unlock()
 	if elem, ok := cc.elements[key]; ok {
 		item := cc.list.Remove(elem).(*memoryCacheItem)
-		val := item.value
+		val := item.Value()
 		delete(cc.elements, item.key)
 		item.term()
 		return val
@@ -129,9 +135,9 @@ func (cc *MemoryCache) Get(key interface{}) interface{} {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 	if elem, ok := cc.elements[key]; ok {
-		if !elem.Value.(*memoryCacheItem).expired {
+		if !elem.Value.(*memoryCacheItem).Expired() {
 			cc.list.MoveToFront(elem)
-			return elem.Value.(*memoryCacheItem).value
+			return elem.Value.(*memoryCacheItem).Value()
 		}
 	}
 	return nil
@@ -148,7 +154,7 @@ func (cc *MemoryCache) Expunge() {
 	expired := make([]interface{}, cc.Len())
 	i := 0
 	for key, elem := range cc.elements {
-		if elem.Value.(*memoryCacheItem).expired {
+		if elem.Value.(*memoryCacheItem).Expired() {
 			expired[i] = key
 			cc.list.Remove(elem)
 			i++

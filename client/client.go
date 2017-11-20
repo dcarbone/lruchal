@@ -8,13 +8,10 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -22,87 +19,46 @@ import (
 var (
 	flagSet *flag.FlagSet
 
-	flagREPL       bool
-	flagPort       uint
-	flagConcurrent uint
-	flagTTL        string
-	flagSleep      string
+	flagPort uint
+	flagAddr string
+
+	flagREPL bool
+
+	flagCount uint
+	flagTTL   string
 )
 
-func benchmark() error {
-	ttl, err := time.ParseDuration(flagTTL)
+func seed() error {
+	_, err := time.ParseDuration(flagTTL)
 	if err != nil {
 		return fmt.Errorf("invalid ttl format: %s", err)
-	}
-	sleep, err := time.ParseDuration(flagSleep)
-	if err != nil {
-		return fmt.Errorf("invalid sleep format: %s", err)
 	}
 	if flagPort == 0 || flagPort > math.MaxUint16 {
 		return fmt.Errorf("port must be: 0 < port <= %d", math.MaxUint16)
 	}
 
-	now := time.Now()
-	requests := uint64(0)
-	fails := uint64(0)
-	wg := new(sync.WaitGroup)
-	wg.Add(int(flagConcurrent))
-	for i := uint(0); i < flagConcurrent; i++ {
-		log.Printf("starting %d", i)
-		go func(i int) {
-			timer := time.NewTimer(ttl)
-			defer func() {
-				timer.Stop()
-				wg.Done()
-				log.Printf("ending %d", i)
-			}()
-			conf := lruchal.NewDefaultClientConfig()
-			conf.Address = fmt.Sprintf(":%d", flagPort)
-			conf.HttpClient.Transport.(*http.Transport).DisableKeepAlives = true
-			conf.HttpClient.Transport.(*http.Transport).MaxIdleConnsPerHost = -1
-			client, err := lruchal.NewClient(conf)
-			if err != nil {
-				log.Printf("Unable to create client: %s", err)
-				return
-			}
-			for i := 0; ; i++ {
-				select {
-				case <-timer.C:
-					return
-				default:
-					atomic.AddUint64(&requests, 1)
-					if i%2 == 0 {
-						err := client.Put(lruchal.Item{strconv.Itoa(rand.Intn(i + 1)), fmt.Sprintf("value%d", i), "1s"})
-						if err != nil {
-							atomic.AddUint64(&fails, 1)
-							log.Printf("put error: %s", err)
-						} else {
-							log.Println("put ok")
-						}
-					} else {
-						v, err := client.Get(strconv.Itoa(rand.Intn(i + 1)))
-						if err != nil {
-							atomic.AddUint64(&fails, 1)
-							log.Printf("get error: %s", err)
-						} else {
-							log.Printf("get value: %#v", v)
-						}
-					}
-				}
-				time.Sleep(sleep)
-			}
-		}(int(i))
+	client, err := lruchal.NewClient(&lruchal.ClientConfig{
+		Address: fmt.Sprintf("%s:%d", flagAddr, flagPort),
+	})
+	if err != nil {
+		return err
 	}
-	wg.Wait()
 
-	log.Printf("Completed %d requests with %d fails in %s", requests, fails, time.Now().Sub(now))
+	for i := 0; i < int(flagCount); i++ {
+		err := client.Put(lruchal.Item{fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", i), flagTTL})
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Fprintf(os.Stdout, "%d keys have been seeded with a duration of %s\n", flagCount, flagTTL)
 
 	return nil
 }
 
 func repl() error {
 	client, err := lruchal.NewClient(&lruchal.ClientConfig{
-		Address: fmt.Sprintf(":%d", flagPort),
+		Address: fmt.Sprintf("%s:%d", flagAddr, flagPort),
 	})
 	if err != nil {
 		return err
@@ -181,10 +137,10 @@ func main() {
 
 	flagSet = flag.NewFlagSet("client", flag.ContinueOnError)
 	flagSet.BoolVar(&flagREPL, "repl", false, "Start in interactive mode")
-	flagSet.UintVar(&flagPort, "port", lruchal.DefaultPort, "Port to listen on")
-	flagSet.UintVar(&flagConcurrent, "concurrent", 10, "Concurrent client count")
-	flagSet.StringVar(&flagTTL, "ttl", "1m", "TTL per concurrent client")
-	flagSet.StringVar(&flagSleep, "sleep", "500ms", "Time per client to sleep between actions")
+	flagSet.StringVar(&flagAddr, "addr", "127.0.0.1", "Address to connect to")
+	flagSet.UintVar(&flagPort, "port", lruchal.DefaultPort, "Port to connect to")
+	flagSet.StringVar(&flagTTL, "ttl", "5m", "Key TTL")
+	flagSet.UintVar(&flagCount, "count", 100, "# of keys to seed")
 	flagSet.Parse(os.Args[1:])
 
 	if flagPort == 0 || flagPort > math.MaxUint16 {
@@ -203,9 +159,9 @@ func main() {
 			errChan <- repl()
 		}()
 	} else {
-		log.Print("Entering benchmark")
+		log.Print("Entering seed")
 		go func() {
-			errChan <- benchmark()
+			errChan <- seed()
 		}()
 	}
 

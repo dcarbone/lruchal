@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 func TestMemoryCache(t *testing.T) {
 	var v interface{}
 
@@ -101,24 +105,73 @@ func TestMemoryCache(t *testing.T) {
 	})
 }
 
-func BenchmarkMemoryCache(b *testing.B) {
+func BenchmarkMemoryCache100(b *testing.B) {
 	maxSize := 100
-	container := lruchal.NewMemoryCache(maxSize)
+	cache := lruchal.NewMemoryCache(maxSize)
 	wg := new(sync.WaitGroup)
-	s := maxSize * 2
-	wg.Add(s)
-	for i := 0; i < s; i++ {
+	wg.Add(maxSize)
+	for i := 0; i < maxSize; i++ {
 		if i%2 == 0 {
 			go func() {
 				for i := 0; i < 1000; i++ {
-					container.Put(rand.Intn(maxSize), i, 500*time.Microsecond)
+					cache.Put(rand.Intn(maxSize), i, 500*time.Microsecond)
 				}
 				wg.Done()
 			}()
 		} else {
 			go func() {
 				for i := 0; i < 1000; i++ {
-					container.Get(rand.Intn(maxSize))
+					cache.Get(rand.Intn(maxSize))
+				}
+				wg.Done()
+			}()
+		}
+	}
+	wg.Wait()
+}
+
+func BenchmarkMemoryCache200(b *testing.B) {
+	maxSize := 200
+	cache := lruchal.NewMemoryCache(maxSize)
+	wg := new(sync.WaitGroup)
+	wg.Add(maxSize)
+	for i := 0; i < maxSize; i++ {
+		if i%2 == 0 {
+			go func() {
+				for i := 0; i < 1000; i++ {
+					cache.Put(rand.Intn(maxSize), i, 500*time.Microsecond)
+				}
+				wg.Done()
+			}()
+		} else {
+			go func() {
+				for i := 0; i < 1000; i++ {
+					cache.Get(rand.Intn(maxSize))
+				}
+				wg.Done()
+			}()
+		}
+	}
+	wg.Wait()
+}
+
+func BenchmarkMemoryCache1000(b *testing.B) {
+	maxSize := 1000
+	cache := lruchal.NewMemoryCache(maxSize)
+	wg := new(sync.WaitGroup)
+	wg.Add(maxSize)
+	for i := 0; i < maxSize; i++ {
+		if i%2 == 0 {
+			go func() {
+				for i := 0; i < 1000; i++ {
+					cache.Put(rand.Intn(maxSize), i, 500*time.Microsecond)
+				}
+				wg.Done()
+			}()
+		} else {
+			go func() {
+				for i := 0; i < 1000; i++ {
+					cache.Get(rand.Intn(maxSize))
 				}
 				wg.Done()
 			}()

@@ -1,0 +1,17 @@
+version: "2"
+
+services:
+  server:
+    build: .
+    working_dir: /go/src/github.com/dcarbone/lruchal/server
+    ports:
+      - "8182:8182"
+    entrypoint: dumb-init
+    command: ./server
+  client:
+    build: .
+    working_dir: /go/src/github.com/dcarbone/lruchal/client
+    entrypoint: dumb-init
+    command: ./client -addr server -ttl 5s
+    links:
+      - server
