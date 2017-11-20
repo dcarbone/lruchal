@@ -96,13 +96,13 @@ func (c *Client) Get(key string) (interface{}, error) {
 	return nil, fmt.Errorf("%d: %s", resp.StatusCode, resp.Status)
 }
 
-func (c *Client) Put(key string, value Item) error {
-	b, err := json.Marshal(value)
+func (c *Client) Put(item Item) error {
+	b, err := json.Marshal(item)
 	if err != nil {
 		return fmt.Errorf("unable to serialize: %s", err)
 	}
 
-	req, err := http.NewRequest("PUT", fmt.Sprintf("http://%s", c.addr), bytes.NewBuffer(b))
+	req, err := http.NewRequest("PUT", fmt.Sprintf("http://%s/put", c.addr), bytes.NewBuffer(b))
 	if err != nil {
 		return fmt.Errorf("unable to create request: %s", err)
 	}
