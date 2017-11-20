@@ -15,7 +15,7 @@ package `golang.org/x/net` because implementing the semaphore is boring.
 
 ## Tests
 
-Executing `make test` will spin up two containers, one for tests and one for bench.  The `-race` flag cannot be testing 
+Executing `make test` will spin up two containers, one for tests and one for bench.  The `-race` flag cannot be tested 
 within alpine at the moment ([see here](https://github.com/golang/go/issues/14481)), and I don't feel it's worth 
 spinning up an entire Ubuntu/etc. container just for one test.  Here is the output of `-race` just for funsies:
 
