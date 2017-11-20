@@ -8,7 +8,6 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
