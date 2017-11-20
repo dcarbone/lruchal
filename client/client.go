@@ -57,24 +57,11 @@ func benchmark() error {
 				wg.Done()
 				log.Printf("ending %d", i)
 			}()
-			client, err := lruchal.NewClient(&lruchal.ClientConfig{
-				HttpClient: &http.Client{
-					Transport: &http.Transport{
-						DisableKeepAlives: true,
-						Proxy:             http.ProxyFromEnvironment,
-						DialContext: (&net.Dialer{
-							Timeout:   30 * time.Second,
-							KeepAlive: 30 * time.Second,
-						}).DialContext,
-						MaxIdleConns:          100,
-						IdleConnTimeout:       90 * time.Second,
-						TLSHandshakeTimeout:   10 * time.Second,
-						ExpectContinueTimeout: 1 * time.Second,
-						MaxIdleConnsPerHost:   -1,
-					},
-				},
-				Address: fmt.Sprintf(":%d", flagPort),
-			})
+			conf := lruchal.NewDefaultClientConfig()
+			conf.Address = fmt.Sprintf(":%d", flagPort)
+			conf.HttpClient.Transport.(*http.Transport).DisableKeepAlives = true
+			conf.HttpClient.Transport.(*http.Transport).MaxIdleConnsPerHost = -1
+			client, err := lruchal.NewClient(conf)
 			if err != nil {
 				log.Printf("Unable to create client: %s", err)
 				return
