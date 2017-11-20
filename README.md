@@ -15,8 +15,15 @@ package `golang.org/x/net` because implementing the semaphore is boring.
 
 ## Tests
 
-Tests are pretty simple as the package is simple, the benchmark tests were used to help ensure I didn't miss any race
-conditions that either myself or `go test -race` missed.
+Executing `make test` will spin up two containers, one for tests and one for bench.  The `-race` flag cannot be testing 
+within alpine at the moment ([see here](https://github.com/golang/go/issues/14481)), and I don't feel it's worth 
+spinning up an entire Ubuntu/etc. container just for one test.  Here is the output of `-race` just for funsies:
+
+```
+go test -race
+PASS
+ok      github.com/dcarbone/lruchal     1.008s
+```
 
 ## Complexity
 

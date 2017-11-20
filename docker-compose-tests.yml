@@ -1,0 +1,12 @@
+version: "2"
+services:
+  test:
+    build: .
+    working_dir: /go/src/github.com/dcarbone/lruchal
+    entrypoint: dumb-init
+    command: go test -v
+  bench:
+    build: .
+    working_dir: /go/src/github.com/dcarbone/lruchal
+    entrypoint: dumb-init
+    command: go test -run _nothing_ -bench .

@@ -1,2 +1,2 @@
 test:
-	go test -v && go test -race && go test -run=_nothing_ -bench=.
+	docker-compose -f docker-compose-tests.yml up --build
