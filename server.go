@@ -140,6 +140,8 @@ func (srv *Server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	srv.log.Printf("handling: GET %s", r.RequestURI)
+
 	if value := srv.cache.Get(split[2]); value == nil {
 		http.Error(w, fmt.Sprintf("Key \"%s\" not found", split[2]), http.StatusNotFound)
 	} else if b, err := json.Marshal(value); err != nil {
@@ -164,6 +166,8 @@ func (srv *Server) put(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Unable to read body: %s", err), http.StatusUnprocessableEntity)
 		return
 	}
+
+	srv.log.Printf("handling: PUT %s", string(b))
 
 	item := new(Item)
 	err = json.Unmarshal(b, item)

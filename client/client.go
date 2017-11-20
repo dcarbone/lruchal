@@ -7,10 +7,15 @@ import (
 	"github.com/dcarbone/lruchal"
 	"log"
 	"math"
+	"math/rand"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -26,6 +31,85 @@ var (
 )
 
 func benchmark() error {
+	ttl, err := time.ParseDuration(flagTTL)
+	if err != nil {
+		return fmt.Errorf("invalid ttl format: %s", err)
+	}
+	sleep, err := time.ParseDuration(flagSleep)
+	if err != nil {
+		return fmt.Errorf("invalid sleep format: %s", err)
+	}
+	if flagPort == 0 || flagPort > math.MaxUint16 {
+		return fmt.Errorf("port must be: 0 < port <= %d", math.MaxUint16)
+	}
+
+	now := time.Now()
+	requests := uint64(0)
+	fails := uint64(0)
+	wg := new(sync.WaitGroup)
+	wg.Add(int(flagConcurrent))
+	for i := uint(0); i < flagConcurrent; i++ {
+		log.Printf("starting %d", i)
+		go func(i int) {
+			timer := time.NewTimer(ttl)
+			defer func() {
+				timer.Stop()
+				wg.Done()
+				log.Printf("ending %d", i)
+			}()
+			client, err := lruchal.NewClient(&lruchal.ClientConfig{
+				HttpClient: &http.Client{
+					Transport: &http.Transport{
+						DisableKeepAlives: true,
+						Proxy:             http.ProxyFromEnvironment,
+						DialContext: (&net.Dialer{
+							Timeout:   30 * time.Second,
+							KeepAlive: 30 * time.Second,
+						}).DialContext,
+						MaxIdleConns:          100,
+						IdleConnTimeout:       90 * time.Second,
+						TLSHandshakeTimeout:   10 * time.Second,
+						ExpectContinueTimeout: 1 * time.Second,
+						MaxIdleConnsPerHost:   -1,
+					},
+				},
+				Address: fmt.Sprintf(":%d", flagPort),
+			})
+			if err != nil {
+				log.Printf("Unable to create client: %s", err)
+				return
+			}
+			for i := 0; ; i++ {
+				select {
+				case <-timer.C:
+					return
+				default:
+					atomic.AddUint64(&requests, 1)
+					if i%2 == 0 {
+						err := client.Put(lruchal.Item{strconv.Itoa(rand.Intn(i + 1)), fmt.Sprintf("value%d", i), "1s"})
+						if err != nil {
+							atomic.AddUint64(&fails, 1)
+							log.Printf("put error: %s", err)
+						} else {
+							log.Println("put ok")
+						}
+					} else {
+						v, err := client.Get(strconv.Itoa(rand.Intn(i + 1)))
+						if err != nil {
+							atomic.AddUint64(&fails, 1)
+							log.Printf("get error: %s", err)
+						} else {
+							log.Printf("get value: %#v", v)
+						}
+					}
+				}
+				time.Sleep(sleep)
+			}
+		}(int(i))
+	}
+	wg.Wait()
+
+	log.Printf("Completed %d requests with %d fails in %s", requests, fails, time.Now().Sub(now))
 
 	return nil
 }
@@ -99,7 +183,6 @@ func repl() error {
 					fmt.Fprintf(os.Stdout, "unknown command \"%s\"", args[0])
 				}
 			}
-
 			mu.Unlock()
 		}
 	}()
@@ -108,6 +191,8 @@ func repl() error {
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	flagSet = flag.NewFlagSet("client", flag.ContinueOnError)
 	flagSet.BoolVar(&flagREPL, "repl", false, "Start in interactive mode")
 	flagSet.UintVar(&flagPort, "port", lruchal.DefaultPort, "Port to listen on")
