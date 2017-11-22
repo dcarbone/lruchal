@@ -27,7 +27,7 @@ ok      github.com/dcarbone/lruchal     1.008s
 
 ## Complexity
 
-This lib has pert-near `O(1)` complexity, as evidenced by this output:
+This lib has pert-near `O(n)` complexity, as evidenced by this output:
 
 ```
 go test -run=_nothing_ -bench=.
